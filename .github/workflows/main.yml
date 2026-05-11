@@ -1,0 +1,44 @@
+name: Daily Continuous Practical-financial-hacks-hindi
+
+on:
+  schedule:
+    - cron: '0 0,6,12,18 * * *'     # Har 6 ghante mein start (00, 06, 12, 18 baje)
+  workflow_dispatch:                # Manual trigger ke liye (test ke liye)
+
+jobs:
+  generate-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360            # Maximum 6 hours tak chal sakta hai
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          ffmpeg-version: '7.0'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Setup Fonts
+        run: python setup_fonts.py
+
+      - name: Run Continuous Shorts Generator
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: python main.py
+
+      - name: Job Summary
+        if: always()
+        run: echo "✅ Job completed at $(date)"
