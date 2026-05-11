@@ -502,7 +502,7 @@ class Composer:
 
         audio_path = scene.get("audio_path")
 
-        total_dur = scene.get("duration", 30)
+        total_dur = scene.get("duration", 60)
 
         if not audio_path or not os.path.exists(audio_path):
 
