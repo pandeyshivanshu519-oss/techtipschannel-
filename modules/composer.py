@@ -1,369 +1,570 @@
 import os
-import re
+import shutil
 import random
 import subprocess
+import requests
 import ffmpeg
+from PIL import Image, ImageDraw, ImageFont
+
 
 class Composer:
+
     def __init__(self):
-        self.temp_dir = os.path.join(os.getcwd(), "assets", "temp")
-        self.final_dir = os.path.join(os.getcwd(), "assets", "final")
-        self.avatar_path = os.path.join(os.getcwd(), "assets", "avatar", "avatars.mp4")
-        self.bg_music_path = "bgmusic.mp3"
-        self.font_path = os.path.join(os.getcwd(), "assets", "fonts", "NotoSans-Bold.ttf")
+        self.temp_dir        = os.path.join(os.getcwd(), "assets", "temp")
+        self.final_dir       = os.path.join(os.getcwd(), "assets", "final")
+        self.loop_videos_dir = os.path.join(os.getcwd(), "assets", "loop_videos")
+        self.bg_music_path   = "bgmusic.mp3"
+        self.font_path       = self._resolve_font()
 
-        os.makedirs(self.temp_dir, exist_ok=True)
-        os.makedirs(self.final_dir, exist_ok=True)
+        os.makedirs(self.temp_dir,        exist_ok=True)
+        os.makedirs(self.final_dir,       exist_ok=True)
+        os.makedirs(self.loop_videos_dir, exist_ok=True)
 
-        self.transitions = ['fade', 'wipeleft', 'wiperight', 'slideleft', 'slideright']
+        if self.font_path:
+            print(f"✅ Font: {self.font_path}")
+        else:
+            print("⚠️  No font — PIL default")
 
-        self.subtitle_style = (
-            "FontName=Noto Sans,"
-            "FontSize=18,"
-            "PrimaryColour=&H00FFFFFF,"
-            "OutlineColour=&H00000000,"
-            "BackColour=&H80000000,"
-            "Bold=1,"
-            "Outline=2,"
-            "Shadow=1,"
-            "Alignment=2,"
-            "MarginV=60"
-        )
+    # ─────────────────────────────────────────────────────────────────
+    # FONT
+    # ─────────────────────────────────────────────────────────────────
 
-    # ────────────────────────────────────────────────────────────────────
-    # HELPERS
-    # ────────────────────────────────────────────────────────────────────
+    def _resolve_font(self):
+        candidates = [
+            os.path.join(os.getcwd(), "assets", "fonts", "NotoSans-Bold.ttf"),
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+            "/usr/share/fonts/noto/NotoSansDevanagari-Bold.ttf",
+        ]
+        for p in candidates:
+            if os.path.exists(p) and os.path.getsize(p) > 10_000:
+                return p
+        return None
+
+    def _pil_font(self, size):
+        if self.font_path:
+            try:
+                return ImageFont.truetype(self.font_path, size)
+            except Exception:
+                pass
+        return ImageFont.load_default()
+
+    # ─────────────────────────────────────────────────────────────────
+    # UTILITIES
+    # ─────────────────────────────────────────────────────────────────
 
     def get_duration(self, filepath):
         try:
-            probe = ffmpeg.probe(filepath)
-            return float(probe['format']['duration'])
+            return float(ffmpeg.probe(filepath)["format"]["duration"])
         except Exception:
             return 0.0
 
-    def _font_arg(self):
-        if os.path.exists(self.font_path):
-            return f"fontfile={self.font_path}:"
-        return ""
+    def _run_cmd(self, cmd, label=""):
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"   ⚠️ {label}:\n{r.stderr[-300:]}")
+            return False
+        return True
 
-    def _chunk_text(self, text, max_chars=40):
-        words = text.split()
-        lines, current = [], []
-        for word in words:
-            if sum(len(w) for w in current) + len(current) + len(word) <= max_chars:
-                current.append(word)
-            else:
-                if current:
-                    lines.append(" ".join(current))
-                current = [word]
-        if current:
-            lines.append(" ".join(current))
-        return lines
+    # ─────────────────────────────────────────────────────────────────
+    # POLLINATIONS — AI Image Generation
+    # ─────────────────────────────────────────────────────────────────
 
-    def _make_subtitle_file(self, text, duration, scene_id):
-        lines = self._chunk_text(text, max_chars=38)
-        if not lines:
+    def _fetch_pollinations_image(self, prompt, scene_id, img_idx):
+        """
+        Pollinations FLUX se AI image generate karo.
+        Tech + cinematic style, portrait format (1080x1920).
+        """
+        full_prompt = (
+            f"{prompt}, ultra realistic, cinematic lighting, "
+            f"tech aesthetic, 4K quality, vertical composition"
+        )
+        encoded  = requests.utils.quote(full_prompt)
+        url      = (
+            f"https://image.pollinations.ai/prompt/{encoded}"
+            f"?width=1080&height=1920&nologo=true&model=flux"
+        )
+        out_path = os.path.join(
+            self.temp_dir, f"pollinations_{scene_id}_{img_idx}.jpg"
+        )
+
+        try:
+            r = requests.get(url, timeout=30)
+            if r.status_code == 200:
+                with open(out_path, "wb") as f:
+                    f.write(r.content)
+                print(f"   🎨 Pollinations image {img_idx+1} generated")
+                return out_path
+        except Exception as e:
+            print(f"   ⚠️ Pollinations failed: {e}")
+
+        return None
+
+    # ─────────────────────────────────────────────────────────────────
+    # PEXELS — Stock Video Download
+    # ─────────────────────────────────────────────────────────────────
+
+    def _fetch_pexels_clip(self, query, scene_id, clip_idx):
+        """
+        Pexels se portrait stock video download karo.
+        """
+        api_key = os.getenv("PEXELS_API_KEY", "")
+        if not api_key:
+            print("   ⚠️ PEXELS_API_KEY not set")
             return None
 
-        srt_path = os.path.join(self.temp_dir, f"sub_{scene_id}.srt")
-        time_per_line = duration / len(lines)
+        headers = {"Authorization": api_key}
+        params  = {
+            "query":       query,
+            "per_page":    5,
+            "orientation": "portrait",
+            "size":        "medium"
+        }
 
-        def fmt(seconds):
-            h = int(seconds // 3600)
-            m = int((seconds % 3600) // 60)
-            s = int(seconds % 60)
-            ms = int((seconds - int(seconds)) * 1000)
-            return f"{h:02}:{m:02}:{s:02},{ms:03}"
+        try:
+            r    = requests.get(
+                "https://api.pexels.com/videos/search",
+                headers=headers, params=params, timeout=10
+            )
+            data = r.json()
+            videos = data.get("videos", [])
+
+            if not videos:
+                simple = query.split()[-1]
+                if simple != query:
+                    print(f"   ⚠️ No results '{query}', retrying '{simple}'")
+                    return self._fetch_pexels_clip(simple, scene_id, clip_idx)
+                return None
+
+            valid  = [v for v in videos if v.get("duration", 0) >= 4] or videos
+            chosen = random.choice(valid)
+            files  = sorted(
+                chosen["video_files"],
+                key=lambda x: x["width"] * x["height"], reverse=True
+            )
+            dl_url = files[0]["link"]
+
+            out_path = os.path.join(
+                self.temp_dir, f"pexels_{scene_id}_{clip_idx}.mp4"
+            )
+            with requests.get(dl_url, stream=True, timeout=20) as dl:
+                dl.raise_for_status()
+                with open(out_path, "wb") as f:
+                    for chunk in dl.iter_content(8192):
+                        f.write(chunk)
+
+            print(f"   🎬 Pexels clip downloaded: '{query}'")
+            return out_path
+
+        except Exception as e:
+            print(f"   ⚠️ Pexels error: {e}")
+            return None
+
+    # ─────────────────────────────────────────────────────────────────
+    # LOOP VIDEO — Brainrot bottom half
+    # ─────────────────────────────────────────────────────────────────
+
+    def _fetch_loop_video(self, scene_index):
+        """
+        assets/loop_videos/ folder se rotation-based video pick karo.
+        Koi bhi .mp4/.mov/.avi/.mkv automatically pick hogi.
+        Hardcoded name ki zaroorat nahi.
+        """
+        exts = (".mp4", ".mov", ".avi", ".mkv")
+        try:
+            all_videos = sorted([
+                os.path.join(self.loop_videos_dir, f)
+                for f in os.listdir(self.loop_videos_dir)
+                if f.lower().endswith(exts)
+            ])
+        except Exception:
+            all_videos = []
+
+        if not all_videos:
+            print("   ⚠️  No loop videos in assets/loop_videos/")
+            print("   💡 Add: subway.mp4, minecraft.mp4, satisfying.mp4 etc.")
+            return None
+
+        chosen = all_videos[scene_index % len(all_videos)]
+        name   = os.path.basename(chosen)
+        idx    = scene_index % len(all_videos) + 1
+        print(f"   🎮 Loop video [{idx}/{len(all_videos)}]: {name}")
+        return chosen
+
+    # ─────────────────────────────────────────────────────────────────
+    # SPLIT SCREEN — Top: content, Bottom: loop video
+    # ─────────────────────────────────────────────────────────────────
+
+    def _apply_split_screen(self, main_video, loop_video, scene_id):
+        """
+        1080x1920 brainrot split screen:
+        - Top 960px   : main content
+        - Bottom 960px: loop video (auto-looped)
+        """
+        out_path = os.path.join(self.temp_dir, f"split_{scene_id}.mp4")
+        main_dur = self.get_duration(main_video)
+
+        print(f"   🎬 Applying brainrot split screen...")
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", main_video,
+            "-stream_loop", "-1",
+            "-i", loop_video,
+            "-filter_complex",
+            (
+                "[0:v]scale=1080:960:force_original_aspect_ratio=increase,"
+                "crop=1080:960,setsar=1[top];"
+                "[1:v]scale=1080:960:force_original_aspect_ratio=increase,"
+                "crop=1080:960,setsar=1[bottom];"
+                "[top][bottom]vstack=inputs=2[outv];"
+                "[0:a]volume=1.0[outa]"
+            ),
+            "-map", "[outv]",
+            "-map", "[outa]",
+            "-t",        str(main_dur),
+            "-c:v",      "libx264",
+            "-preset",   "fast",
+            "-crf",      "23",
+            "-c:a",      "aac",
+            "-b:a",      "192k",
+            "-r",        "30",
+            "-pix_fmt",  "yuv420p",
+            "-movflags", "faststart",
+            out_path
+        ]
+
+        ok = self._run_cmd(cmd, "Split screen")
+        if ok and os.path.exists(out_path):
+            print(f"   ✅ Split screen done")
+            return out_path
+
+        print(f"   ⚠️ Split screen failed — using original")
+        return main_video
+
+    # ─────────────────────────────────────────────────────────────────
+    # SUBTITLES
+    # ─────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _srt_ts(seconds):
+        seconds  = max(0.0, seconds)
+        total_ms = int(round(seconds * 1000))
+        ms = total_ms % 1000
+        s  = (total_ms // 1000) % 60
+        m  = (total_ms // 60000) % 60
+        h  = total_ms // 3600000
+        return f"{h:02}:{m:02}:{s:02},{ms:03}"
+
+    def _make_srt(self, text, duration, scene_id):
+        words = text.split()
+        if not words:
+            return None
+
+        srt_path       = os.path.join(self.temp_dir, f"sub_{scene_id}.srt")
+        words_per_line = 5
+        chunks         = []
+
+        for i in range(0, len(words), words_per_line):
+            chunks.append(" ".join(words[i:i + words_per_line]))
+
+        time_per_chunk = duration / max(len(chunks), 1)
 
         with open(srt_path, "w", encoding="utf-8") as f:
-            for i, line in enumerate(lines):
-                start = i * time_per_line
-                end = min((i + 1) * time_per_line, duration - 0.05)
-                f.write(f"{i+1}\n{fmt(start)} --> {fmt(end)}\n{line}\n\n")
+            for i, chunk in enumerate(chunks):
+                start = i * time_per_chunk
+                end   = min((i + 1) * time_per_chunk - 0.05, duration - 0.1)
+                f.write(
+                    f"{i+1}\n"
+                    f"{self._srt_ts(start)} --> {self._srt_ts(end)}\n"
+                    f"{chunk}\n\n"
+                )
 
         return srt_path
 
-    def _burn_subtitles(self, input_video, srt_path, output_path):
-        font_arg = self._font_arg()
+    def _burn_subtitles(self, src, srt_path, dst):
+        if not self.font_path:
+            shutil.copy2(src, dst)
+            return False
+
+        safe_srt  = srt_path.replace("\\", "/")
+        safe_font = self.font_path.replace("\\", "/")
+
+        if len(safe_srt) >= 2 and safe_srt[1] == ":":
+            safe_srt = safe_srt[0] + "\\:" + safe_srt[2:]
+
         style = (
-            f"{font_arg}"
-            "FontSize=18,"
+            f"fontfile={safe_font},"
+            "FontSize=16,"
             "PrimaryColour=&H00FFFFFF,"
             "OutlineColour=&H00000000,"
-            "BackColour=&H80000000,"
+            "BackColour=&H90000000,"
             "Bold=1,"
             "Outline=2,"
             "Shadow=1,"
             "Alignment=2,"
-            "MarginV=60"
+            "MarginV=80,"
+            "MarginL=30,"
+            "MarginR=30"
         )
-        safe_srt = srt_path.replace("\\", "/").replace(":", "\\:")
-        vf = f"subtitles='{safe_srt}':force_style='{style}'"
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", input_video,
-            "-vf", vf,
-            "-c:v", "libx264",
-            "-c:a", "copy",
-            "-pix_fmt", "yuv420p",
-            "-preset", "medium",
-            output_path
+            "ffmpeg", "-y", "-i", src,
+            "-vf", f"subtitles='{safe_srt}':force_style='{style}'",
+            "-c:v", "libx264", "-c:a", "copy",
+            "-pix_fmt", "yuv420p", "-preset", "fast", dst,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"   ⚠️ Subtitle burn failed, keeping raw video.\n{result.stderr[-300:]}")
-            import shutil
-            shutil.copy2(input_video, output_path)
+        ok = self._run_cmd(cmd, "Subtitles")
+        if not ok:
+            shutil.copy2(src, dst)
+        return ok
 
-    def _add_hook_text(self, input_video, hook_line, output_path):
-        font_arg = self._font_arg()
-        safe_text = hook_line.replace("'", "\\'").replace(":", "\\:")
+    # ─────────────────────────────────────────────────────────────────
+    # KEN BURNS — Image → Video with cinematic zoom
+    # ─────────────────────────────────────────────────────────────────
 
+    def _image_to_kenburns(self, img_path, duration, out_path, zoom_dir="in"):
+        fps    = 25
+        frames = int(duration * fps)
+        z_expr = (
+            "min(zoom+0.0003,1.08)" if zoom_dir == "in"
+            else "max(zoom-0.0003,1.0)"
+        )
         vf = (
-            f"drawtext="
-            f"{font_arg}"
-            f"text='{safe_text}':"
-            f"fontsize=28:"
-            f"fontcolor=white:"
-            f"borderw=3:"
-            f"bordercolor=black:"
-            f"x=(w-text_w)/2:"
-            f"y=80:"
-            f"enable='between(t,0,3)'"
+            f"scale=1200:2133,"
+            f"zoompan=z='{z_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d={frames}:s=1080x1920:fps={fps},"
+            f"setpts=PTS-STARTPTS,fps={fps}"
         )
-
         cmd = [
             "ffmpeg", "-y",
-            "-i", input_video,
+            "-loop", "1", "-i", img_path,
             "-vf", vf,
+            "-t", str(duration),
             "-c:v", "libx264",
-            "-c:a", "copy",
             "-pix_fmt", "yuv420p",
-            "-preset", "medium",
-            output_path
+            "-preset", "fast", out_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"   ⚠️ Hook text burn failed.\n{result.stderr[-200:]}")
-            import shutil
-            shutil.copy2(input_video, output_path)
+        return self._run_cmd(cmd, "KenBurns")
 
-    def _add_channel_watermark(self, input_video, channel_name, output_path):
-        font_arg = self._font_arg()
-        safe_name = channel_name.replace("'", "\\'").replace(":", "\\:")
-
-        vf = (
-            f"drawtext="
-            f"{font_arg}"
-            f"text='{safe_name}':"
-            f"fontsize=14:"
-            f"fontcolor=white@0.7:"
-            f"borderw=2:"
-            f"bordercolor=black@0.5:"
-            f"x=w-text_w-20:"
-            f"y=30"
-        )
-
+    def _clip_to_portrait(self, clip_path, duration, out_path):
         cmd = [
-            "ffmpeg", "-y",
-            "-i", input_video,
-            "-vf", vf,
-            "-c:v", "libx264",
-            "-c:a", "copy",
-            "-pix_fmt", "yuv420p",
-            "-preset", "medium",
-            output_path
+            "ffmpeg", "-y", "-i", clip_path,
+            "-vf", (
+                "scale=1080:1920:force_original_aspect_ratio=increase,"
+                "crop=1080:1920,fps=25"
+            ),
+            "-t", str(duration), "-an",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-preset", "fast", out_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"   ⚠️ Watermark burn failed.\n{result.stderr[-200:]}")
-            import shutil
-            shutil.copy2(input_video, output_path)
+        return self._run_cmd(cmd, "Clip→Portrait")
 
-    # ────────────────────────────────────────────────────────────────────
-    # SCENE RENDERING
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
+    # BUILD VISUAL — Pollinations images + Pexels clips
+    # ─────────────────────────────────────────────────────────────────
 
-    def process_scene(self, scene, video_pair, is_avatar=False):
-        scene_id    = scene.get('id', 1)
-        audio_path  = scene.get('audio_path')
-        total_dur   = scene.get('duration', 0)
-        script_text = scene.get('text', '')
-        is_first    = scene.get('is_first', False)
+    def _build_visual(self, scene, total_dur):
+        """
+        4 segments banata hai:
+        1. Pollinations AI image (visual_1) — Ken Burns zoom in
+        2. Pexels clip (visual_1)
+        3. Pollinations AI image (visual_2) — Ken Burns zoom out
+        4. Pexels clip (visual_2)
+        Concatenate karke ek visual track return karta hai.
+        """
+        scene_id = scene.get("id", 1)
+        v1       = scene.get("visual_1", "smartphone tech")
+        v2       = scene.get("visual_2", "person computer")
+        segments = []
+        dur_each = max(total_dur / 4, 3.0)
+
+        # Segment 1 — AI image visual_1
+        img1 = self._fetch_pollinations_image(v1, scene_id, 0)
+        if img1:
+            seg1 = os.path.join(self.temp_dir, f"seg_{scene_id}_1.mp4")
+            if self._image_to_kenburns(img1, dur_each, seg1, "in"):
+                segments.append(seg1)
+
+        # Segment 2 — Pexels clip visual_1
+        clip1 = self._fetch_pexels_clip(v1, scene_id, 0)
+        if clip1:
+            seg2 = os.path.join(self.temp_dir, f"seg_{scene_id}_2.mp4")
+            if self._clip_to_portrait(clip1, dur_each, seg2):
+                segments.append(seg2)
+
+        # Segment 3 — AI image visual_2
+        img2 = self._fetch_pollinations_image(v2, scene_id, 1)
+        if img2:
+            seg3 = os.path.join(self.temp_dir, f"seg_{scene_id}_3.mp4")
+            if self._image_to_kenburns(img2, dur_each, seg3, "out"):
+                segments.append(seg3)
+
+        # Segment 4 — Pexels clip visual_2
+        clip2 = self._fetch_pexels_clip(v2, scene_id, 1)
+        if clip2:
+            seg4 = os.path.join(self.temp_dir, f"seg_{scene_id}_4.mp4")
+            if self._clip_to_portrait(clip2, dur_each, seg4):
+                segments.append(seg4)
+
+        if not segments:
+            print(f"   ❌ No visuals found for Scene {scene_id}")
+            return None
+
+        if len(segments) == 1:
+            return segments[0]
+
+        list_file = os.path.join(self.temp_dir, f"seglist_{scene_id}.txt")
+        with open(list_file, "w") as f:
+            for p in segments:
+                f.write(f"file '{p}'\n")
+
+        out = os.path.join(self.temp_dir, f"visual_{scene_id}.mp4")
+        ok  = self._run_cmd([
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", list_file,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-preset", "fast", out,
+        ], "Concat segments")
+
+        return out if (ok and os.path.exists(out)) else segments[0]
+
+    # ─────────────────────────────────────────────────────────────────
+    # PROCESS SCENE
+    # ─────────────────────────────────────────────────────────────────
+
+    def process_scene(self, scene, scene_index=0):
+        scene_id   = scene.get("id", 1)
+        audio_path = scene.get("audio_path")
+        total_dur  = scene.get("duration", 0)
+        script_txt = scene.get("text", "")
 
         if not audio_path or not os.path.exists(audio_path):
             print(f"   ⚠️ Audio missing for Scene {scene_id}")
             return None
 
-        raw_path    = os.path.join(self.temp_dir, f"scene_{scene_id}_raw.mp4")
-        subbed_path = os.path.join(self.temp_dir, f"scene_{scene_id}_sub.mp4")
-        hooked_path = os.path.join(self.temp_dir, f"scene_{scene_id}_hook.mp4")
-        output_path = os.path.join(self.temp_dir, f"scene_{scene_id}.mp4")
+        nosub_path  = os.path.join(self.temp_dir, f"nosub_{scene_id}.mp4")
+        subbed_path = os.path.join(self.temp_dir, f"subbed_{scene_id}.mp4")
+        final_path  = os.path.join(self.temp_dir, f"scene_{scene_id}.mp4")
 
-        # ── 1. Build raw scene ──────────────────────────────────────────
+        # ── Step 1: Build visual ──────────────────────────────────────
+        print(f"   🖼️  Building visuals Scene {scene_id}...")
+        visual = self._build_visual(scene, total_dur)
+        if not visual:
+            return None
+
+        # ── Step 2: Mix voice + bg music ─────────────────────────────
         try:
-            voice_audio = ffmpeg.input(audio_path)
+            voice = ffmpeg.input(audio_path)
+            vis   = ffmpeg.input(visual)
 
             if os.path.exists(self.bg_music_path):
-                bg_music = (
+                bg = (
                     ffmpeg.input(self.bg_music_path, stream_loop=-1)
-                    .filter('volume', 0.15)
-                    .filter('atrim', duration=total_dur + 1)
+                    .filter("volume", 0.10)
+                    .filter("atrim", duration=total_dur + 2)
                 )
-                audio_stream = ffmpeg.filter(
-                    [voice_audio, bg_music], 'amix', inputs=2, duration='first'
-                )
-            else:
-                audio_stream = voice_audio
-
-            if is_avatar and os.path.exists(self.avatar_path):
-                print(f"   ⚙️ Scene {scene_id}: 🤖 Avatar Mode")
-                video_stream = (
-                    ffmpeg.input(self.avatar_path, stream_loop=-1)
-                    .trim(duration=total_dur + 0.5)
-                    .setpts('PTS-STARTPTS')
-                    .filter('scale', 1080, 1920, force_original_aspect_ratio='increase')
-                    .filter('crop', 1080, 1920)
-                    .filter('fps', fps=30)
+                audio_out = ffmpeg.filter(
+                    [voice, bg], "amix", inputs=2, duration="first"
                 )
             else:
-                print(f"   ⚙️ Scene {scene_id}: 🎞️ A/B Split Mode")
-
-                # ✅ FIX: video_pair None check
-                if not video_pair:
-                    print(f"   ❌ Scene {scene_id}: video_pair is None, skipping scene")
-                    return None
-
-                path_a, path_b = video_pair
-
-                # ✅ FIX: individual path checks
-                if not path_a or not os.path.exists(path_a):
-                    print(f"   ❌ Scene {scene_id}: path_a missing or not found")
-                    return None
-
-                if not path_b or not os.path.exists(path_b):
-                    print(f"   ⚠️ Scene {scene_id}: path_b missing, using path_a for both")
-                    path_b = path_a
-
-                dur_a = total_dur / 2
-                dur_b = total_dur / 2 + 0.3
-
-                stream_a = (
-                    ffmpeg.input(path_a, stream_loop=-1)
-                    .trim(duration=dur_a).setpts('PTS-STARTPTS')
-                    .filter('scale', 1080, 1920).filter('crop', 1080, 1920)
-                    .filter('fps', fps=30)
-                )
-                stream_b = (
-                    ffmpeg.input(path_b, stream_loop=-1)
-                    .trim(duration=dur_b).setpts('PTS-STARTPTS')
-                    .filter('scale', 1080, 1920).filter('crop', 1080, 1920)
-                    .filter('fps', fps=30)
-                )
-                video_stream = ffmpeg.concat(stream_a, stream_b, v=1, a=0)
+                audio_out = voice
 
             (
                 ffmpeg.output(
-                    video_stream, audio_stream, raw_path,
-                    vcodec='libx264', acodec='aac',
-                    pix_fmt='yuv420p', preset='medium', movflags='faststart'
+                    vis.video, audio_out, nosub_path,
+                    vcodec="libx264", acodec="aac",
+                    pix_fmt="yuv420p", preset="medium",
+                    movflags="faststart",
+                    shortest=None
                 ).run(overwrite_output=True, quiet=True)
             )
 
         except Exception as e:
-            print(f"❌ Render Fail Scene {scene_id}: {e}")
+            print(f"   ❌ Audio mix failed Scene {scene_id}: {e}")
             return None
 
-        # ── 2. Burn subtitles ───────────────────────────────────────────
-        current = raw_path
-        if script_text.strip():
-            srt_path = self._make_subtitle_file(script_text, total_dur, scene_id)
-            if srt_path:
-                self._burn_subtitles(current, srt_path, subbed_path)
-                current = subbed_path
+        # ── Step 3: Burn subtitles ────────────────────────────────────
+        actual_dur = self.get_duration(nosub_path)
+        srt        = self._make_srt(script_txt, actual_dur, scene_id)
+
+        if srt:
+            ok      = self._burn_subtitles(nosub_path, srt, subbed_path)
+            current = (
+                subbed_path if (ok and os.path.exists(subbed_path))
+                else nosub_path
+            )
+            if ok:
                 print(f"   ✅ Scene {scene_id}: subtitles burned")
+        else:
+            current = nosub_path
 
-        # ── 3. Hook text on FIRST scene only ───────────────────────────
-        if is_first:
-            self._add_hook_text(current, "क्या आप जानते हैं? 😱", hooked_path)
-            current = hooked_path
-            print(f"   ✅ Scene {scene_id}: hook text added")
+        if current != final_path:
+            shutil.copy2(current, final_path)
 
-        # ── 4. Copy final scene to output_path ─────────────────────────
-        if current != output_path:
-            import shutil
-            shutil.copy2(current, output_path)
+        # ── Step 4: Brainrot split screen ────────────────────────────
+        loop_video = self._fetch_loop_video(scene_index)
+        if loop_video and os.path.exists(loop_video):
+            split = self._apply_split_screen(final_path, loop_video, scene_id)
+            if split and os.path.exists(split):
+                shutil.copy2(split, final_path)
+                print(f"   🎮 Brainrot split screen applied!")
+        else:
+            print(f"   ℹ️  No loop video — normal output")
 
-        return output_path
+        print(f"   ✅ Scene {scene_id} complete ({total_dur:.1f}s)")
+        return final_path
 
-    # ────────────────────────────────────────────────────────────────────
-    # RENDER ALL SCENES
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
+    # RENDER ALL
+    # ─────────────────────────────────────────────────────────────────
 
-    def render_all_scenes(self, script_data, video_pairs):
-        rendered_paths = []
-        avatar_indices = []
-
-        if len(script_data) >= 4 and os.path.exists(self.avatar_path):
-            valid_range = list(range(1, len(script_data) - 1))
-            count = min(2, len(valid_range))
-            avatar_indices = random.sample(valid_range, count)
-            print(f"🎲 Avatar injected in scenes: {[i+1 for i in avatar_indices]}")
-
+    def render_all_scenes(self, script_data):
+        """
+        Sirf script_data pass karo.
+        Composer khud visuals fetch karta hai (Pollinations + Pexels).
+        """
+        rendered = []
         for i, scene in enumerate(script_data):
-            scene['is_first'] = (i == 0)
-            is_avatar = i in avatar_indices
+            print(f"\n🎬 Processing Scene {i+1}/{len(script_data)}...")
+            path = self.process_scene(scene, scene_index=i)
+            if path:
+                rendered.append(path)
+            else:
+                print(f"   ⚠️ Scene {i+1} failed, skipping")
+        return rendered
 
-            # ✅ FIX: Safe index access + None check
-            current_pair = video_pairs[i] if i < len(video_pairs) else None
-
-            if is_avatar:
-                current_pair = (self.avatar_path, None)
-            elif current_pair is None:
-                # Fallback: agar video pair nahi mila toh avatar try karo
-                if os.path.exists(self.avatar_path):
-                    print(f"   ⚠️ Scene {i+1}: No video pair, falling back to avatar")
-                    is_avatar = True
-                    current_pair = (self.avatar_path, None)
-                else:
-                    print(f"   ❌ Scene {i+1}: No video pair and no avatar. Skipping.")
-                    continue
-
-            output_path = self.process_scene(scene, current_pair, is_avatar)
-            if output_path:
-                rendered_paths.append(output_path)
-
-        return rendered_paths
-
-    # ────────────────────────────────────────────────────────────────────
-    # CONCATENATE + WATERMARK
-    # ────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────
+    # FINAL CONCATENATE
+    # ─────────────────────────────────────────────────────────────────
 
     def concatenate_with_transitions(
         self,
         video_paths,
         output_filename="final_short.mp4",
-        channel_name="@HindiFacts"
+        channel_name="@TechShorts"
     ):
-        print("🎬 Stitching final video with transitions...")
-
+        print("\n🎬 Stitching final video...")
         output_path = os.path.join(self.final_dir, output_filename)
-        no_wm_path  = os.path.join(self.final_dir, "final_nowm.mp4")
 
-        for p in (output_path, no_wm_path):
-            if os.path.exists(p):
-                try:
-                    os.remove(p)
-                except Exception:
-                    pass
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass
 
         if not video_paths:
             return None
 
-        input1      = ffmpeg.input(video_paths[0])
-        v_stream    = input1.video
-        a_stream    = input1.audio
+        if len(video_paths) == 1:
+            shutil.copy2(video_paths[0], output_path)
+            print(f"✅ FINAL VIDEO: {output_path}")
+            return output_path
+
+        inp         = ffmpeg.input(video_paths[0])
+        v_stream    = inp.video
+        a_stream    = inp.audio
         current_dur = self.get_duration(video_paths[0])
 
         for i in range(1, len(video_paths)):
@@ -371,36 +572,28 @@ class Composer:
             next_dur = self.get_duration(video_paths[i])
             trans    = 0.5
             offset   = max(current_dur - trans, 0.1)
-            effect   = random.choice(self.transitions)
 
             v_stream = ffmpeg.filter(
-                [v_stream, nxt.video], 'xfade',
-                transition=effect, duration=trans, offset=offset
+                [v_stream, nxt.video], "xfade",
+                transition="fade", duration=trans, offset=offset
             )
             a_stream = ffmpeg.filter(
-                [a_stream, nxt.audio], 'acrossfade', d=trans
+                [a_stream, nxt.audio], "acrossfade", d=trans
             )
-            current_dur = current_dur + next_dur - trans
+            current_dur += next_dur - trans
 
         try:
             (
                 ffmpeg.output(
-                    v_stream, a_stream, no_wm_path,
-                    vcodec='libx264', acodec='aac',
-                    pix_fmt='yuv420p', preset='medium', movflags='faststart'
+                    v_stream, a_stream, output_path,
+                    vcodec="libx264", acodec="aac",
+                    pix_fmt="yuv420p", preset="medium",
+                    movflags="faststart"
                 ).run(overwrite_output=True, quiet=False)
             )
         except Exception as e:
-            print(f"❌ Stitching Error: {e}")
+            print(f"❌ Stitching error: {e}")
             return None
 
-        print("🏷️ Adding channel watermark...")
-        self._add_channel_watermark(no_wm_path, channel_name, output_path)
-
-        try:
-            os.remove(no_wm_path)
-        except Exception:
-            pass
-
-        print(f"✅ FINAL VIDEO SAVED: {output_path}")
+        print(f"✅ FINAL VIDEO: {output_path}")
         return output_path
