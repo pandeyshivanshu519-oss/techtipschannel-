@@ -102,7 +102,7 @@ async def create_one_short(short_number):
     final_scene_paths = composer.render_all_scenes(
     script_data,
     assets_map,
-    []
+    
 )
 
     if not final_scene_paths:
