@@ -11,7 +11,6 @@ import shutil
 
 def clean_cache():
     """Safely deletes temporary files"""
-
     print("🧹 Cleaning up temporary files...")
 
     folders_to_clean = [
@@ -21,26 +20,18 @@ def clean_cache():
     ]
 
     for folder in folders_to_clean:
-
         if not os.path.exists(folder):
             continue
-
         if "assets" not in folder:
             continue
-
         for filename in os.listdir(folder):
-
             file_path = os.path.join(folder, filename)
-
             try:
-
                 if os.path.isfile(file_path) or os.path.islink(file_path):
                     os.unlink(file_path)
                     print(f"   Deleted: {filename}")
-
                 elif os.path.isdir(file_path):
                     shutil.rmtree(file_path)
-
             except Exception as e:
                 print(f"   Failed to delete {file_path}: {e}")
 
@@ -48,62 +39,49 @@ def clean_cache():
 
 
 async def create_one_short(short_number):
-
     print(f"🚀 Starting New Short Generation #{short_number}...")
 
     # ==========================================
     # BRAIN
     # ==========================================
-
     brain = ContentBrain()
 
     try:
-
         script_data = brain.generate_script()
-
         if not script_data:
             print("❌ Script generation failed")
             return False
-
     except Exception as e:
-
         print(f"❌ Brain Error: {e}")
         return False
 
     # ==========================================
     # AUDIO
     # ==========================================
-
     audio_engine = AudioEngine()
 
     try:
-
         script_data = await audio_engine.process_script(script_data)
-
     except Exception as e:
-
         print(f"❌ Audio Error: {e}")
         return False
 
     # ==========================================
     # ASSETS
     # ==========================================
-
     asset_manager = AssetManager()
-
     assets_map = asset_manager.get_videos(script_data)
 
     # ==========================================
     # COMPOSER
     # ==========================================
-
     composer = Composer()
 
+    # ✅ FIX: Sirf 2 arguments — [] wala third arg hata diya
     final_scene_paths = composer.render_all_scenes(
-    script_data,
-    assets_map,
-    
-)
+        script_data,
+        assets_map
+    )
 
     if not final_scene_paths:
         print("❌ Failed to generate scenes")
@@ -112,7 +90,6 @@ async def create_one_short(short_number):
     # ==========================================
     # FINAL VIDEO
     # ==========================================
-
     composer.concatenate_with_transitions(final_scene_paths)
 
     clean_cache()
@@ -122,11 +99,9 @@ async def create_one_short(short_number):
     # ==========================================
     # THUMBNAIL
     # ==========================================
-
     print("🖼️ Generating Thumbnail...")
 
     thumbnail_gen = ThumbnailGenerator()
-
     thumbnail_path = thumbnail_gen.generate_thumbnail(
         title=script_data[0].get('title', 'Tech Secrets'),
         script_text=script_data[0].get('text', ''),
@@ -136,11 +111,9 @@ async def create_one_short(short_number):
     # ==========================================
     # YOUTUBE UPLOAD
     # ==========================================
-
     print("📤 Uploading to YouTube...")
 
     try:
-
         from modules.uploader import YouTubeUploader
 
         uploader = YouTubeUploader()
@@ -148,10 +121,8 @@ async def create_one_short(short_number):
         scene = script_data[0] if isinstance(script_data, list) else script_data
 
         script_text = scene.get('text', 'Tech Secrets')
-
-        category = scene.get('category', 'Tech')
-
-        title = f"🔥 Viral Tech Trick {script_text[:35]}..."
+        category    = scene.get('category', 'Tech')
+        title       = f"🔥 Viral Tech Trick {script_text[:35]}..."
 
         description = f"""
 🔥 Yeh Tech Hack Aaj Hi Try Karo!
@@ -227,62 +198,43 @@ Copyright Disclaimer Under Section 107 of the Copyright Act 1976.
         )
 
         if video_id:
-
             print("✅ VIDEO UPLOADED SUCCESSFULLY!")
             print(f"🔗 https://youtu.be/{video_id}")
-
             return True
-
         else:
-
             print("❌ Upload failed")
-
             return False
 
     except Exception as e:
-
         print(f"❌ Upload Error: {e}")
-
         return False
 
 
 async def main():
-
     print("🚀 VIRAL TECH CHANNEL MODE ACTIVATED...\n")
-
     print("Will keep generating fresh shorts until GitHub stops the job...\n")
 
     short_count = 0
-
-    start_time = time.time()
+    start_time  = time.time()
 
     while True:
-
         short_count += 1
-
         print(f"\n🔄 === Generating Short #{short_count} ===\n")
 
         success = await create_one_short(short_number=short_count)
 
         if success:
-
             print(f"✅ Short #{short_count} completed & uploaded!")
-
         else:
-
             print(f"⚠️ Short #{short_count} had some issues. Continuing...")
 
         print("⏳ Waiting 15 minutes before next short...\n")
-
         await asyncio.sleep(900)
 
         if time.time() - start_time > 19800:
-
             print("⏹️ Maximum runtime reached. Stopping now...")
-
             break
 
 
 if __name__ == "__main__":
-
     asyncio.run(main())
