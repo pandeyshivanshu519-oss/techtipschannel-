@@ -46,22 +46,23 @@ class ContentBrain:
                     return json.load(f)
             except Exception:
                 pass
-
-        return {
-            "used_topics": [],
-            "used_categories": []
-        }
+        return {"used_topics": [], "used_categories": []}
 
     def save_history(self, title, category):
         try:
+            if "used_topics" not in self.history:
+                self.history["used_topics"] = []
+            if "used_categories" not in self.history:
+                self.history["used_categories"] = []
+
             if title and title not in self.history["used_topics"]:
                 self.history["used_topics"].append(title)
 
             if category:
                 self.history["used_categories"].append(category)
 
-            self.history["used_topics"] = self.history["used_topics"][-300:]
-            self.history["used_categories"] = self.history["used_categories"][-50:]
+            self.history["used_topics"]      = self.history["used_topics"][-300:]
+            self.history["used_categories"]  = self.history["used_categories"][-50:]
 
             with open(self.history_file, "w", encoding="utf-8") as f:
                 json.dump(self.history, f, indent=4, ensure_ascii=False)
@@ -70,8 +71,10 @@ class ContentBrain:
             print(f"❌ Failed saving history: {e}")
 
     def get_next_category(self):
-        recent = self.history.get("used_categories", [])[-5:]
+        if "used_categories" not in self.history:
+            self.history["used_categories"] = []
 
+        recent    = self.history["used_categories"][-5:]
         available = [c for c in self.tech_categories if c not in recent]
 
         if not available:
@@ -84,96 +87,95 @@ class ContentBrain:
         category = self.get_next_category()
 
         print(f"🧠 Selected Category: {category}")
-        print("🚀 Generating Viral Tech Short...")
+        print("🚀 Generating Problem-Solving Tech Short...")
 
         used_topics = self.history.get("used_topics", [])[-30:]
-        used_str = ", ".join(used_topics) if used_topics else "none"
+        used_str    = ", ".join(used_topics) if used_topics else "none"
 
         prompt = f"""
-You are an elite viral Hindi tech YouTube Shorts creator.
+Tu ek elite viral Hindi tech YouTube Shorts creator hai.
 
-Generate ONE highly engaging, ultra-viral, fast-paced tech short script for YouTube Shorts.
+CATEGORY: {category}
 
-CATEGORY:
-{category}
+TASK:
+Ek ultra-viral, problem-solving tech short script generate kar.
 
-STYLE:
-- Hinglish language
-- High retention
-- Fast pacing
-- Human conversational tone
-- Curiosity driven
-- Useful and practical
-- Modern Gen-Z style
+════════════════════════════════════════
+SCRIPT FORMAT — STRICTLY FOLLOW THIS:
+════════════════════════════════════════
 
-TOPICS CAN INCLUDE:
-- Android hidden features
-- AI tools
-- ChatGPT tricks
-- cybersecurity
-- Instagram tricks
-- WhatsApp tricks
-- coding
-- gaming
-- gadgets
-- laptop tips
-- WiFi tricks
-- mobile settings
-- apps
-- social media hacks
-- future technology
-- productivity tools
+STRUCTURE (is exact order mein):
 
-STRICT RULES:
-- Script should be 45-60 seconds
-- First line MUST create curiosity
-- Every sentence should feel punchy
-- No boring intros
-- No greetings
-- Avoid robotic tone
-- Add practical value
-- Use very simple Hindi + English mix
-- Make it sound like a viral reel creator
+1. PROBLEM (2-3 lines)
+   - Real problem jo viewer face karta hai
+   - Relatable, specific, frustrating
+   - Example: "Kya tera phone slow ho gaya hai? Apps open hone mein time lagta hai? Battery bhi jaldi khatam hoti hai?"
 
-HOOK EXAMPLES:
-- "99% log ye setting nahi jaante..."
-- "Ye AI tool tumhara kaam aadha kar dega..."
-- "Agar tum Android use karte ho toh ye dekho..."
-- "Phone slow ho raha hai? Ye karo..."
-- "Hackers se bachna hai toh ye setting ON karo..."
+2. REASON (1-2 lines)
+   - Short explanation kyun hota hai ye
+   - Example: "Kyunki background mein 20+ apps chal rahi hain silently."
 
-IMPORTANT:
-Do NOT repeat these topics:
-{used_str}
+3. SOLUTION — STEP BY STEP (3-5 steps)
+   - Numbered steps, action-oriented
+   - Exact settings/menu names batao
+   - Example:
+     "Step 1: Settings kholo.
+      Step 2: Battery & Performance jaao.
+      Step 3: Background apps restrict karo.
+      Step 4: Done. Phone restart karo."
 
-VISUAL KEYWORD RULES:
-- visual_1 and visual_2 are Pexels search terms
-- Must be REAL objects/scenes
-- 3-5 words only
-- English only
+4. RESULT (1-2 lines)
+   - Kya fayda milega exactly
+   - Measurable result batao
+   - Example: "Iske baad phone 2x fast chalega aur battery 30% zyada chalegi."
+
+5. CTA (1 line)
+   - Strong call to action
+   - Example: "Abhi try karo aur comment mein batao kitna fast hua!"
+
+════════════════════════════════════════
+TONE & STYLE RULES:
+════════════════════════════════════════
+- Hinglish — simple Hindi + English mix
+- Direct, punchy, no fluff
+- NO greetings, NO "Hello doston", NO "Aaj main bataunga"
+- Start DIRECTLY with the problem
+- Every line must earn its place — no filler
+- Conversational but confident
+- Sound like a friend giving advice, not a teacher
+- Max 55 seconds when read aloud
+
+════════════════════════════════════════
+VISUAL TERMS (Pexels search):
+════════════════════════════════════════
+- visual_1: Scene jo PROBLEM show kare
+- visual_2: Scene jo SOLUTION/RESULT show kare
+- English only, 3-5 words, realistic searchable terms
 - No abstract words
 
 GOOD EXAMPLES:
-"person using smartphone"
-"rgb gaming keyboard"
-"laptop coding screen"
-"mobile app scrolling"
-"person typing laptop"
-"smartphone home screen"
-"wifi router blinking"
-"artificial intelligence screen"
+"person frustrated slow phone"
+"smartphone settings menu screen"
+"person typing fast laptop"
+"wifi router close up"
+"android phone battery settings"
 
-RETURN ONLY VALID JSON:
+════════════════════════════════════════
+AVOID REPEATING THESE TOPICS:
+{used_str}
+════════════════════════════════════════
+
+RETURN ONLY VALID JSON — NO MARKDOWN, NO EXPLANATION:
 
 [
   {{
     "id": 1,
     "category": "{category}",
-    "title": "Ultra catchy SEO title under 60 characters",
-    "text": "Full viral Hinglish script",
-    "hook_text": "Very short viral hook text",
-    "visual_1": "realistic pexels search term",
-    "visual_2": "another realistic pexels search term"
+    "title": "SEO title under 60 chars — problem + solution format",
+    "text": "Full problem-solving script in Hinglish, 45-55 seconds",
+    "hook_text": "One-line hook that creates instant curiosity",
+    "visual_1": "pexels search term for problem scene",
+    "visual_2": "pexels search term for solution scene"
   }}
 ]
 """
@@ -185,9 +187,7 @@ RETURN ONLY VALID JSON:
         ]
 
         for model_name in models:
-
             for attempt in range(3):
-
                 try:
                     print(f"🔄 {model_name} Attempt {attempt+1}/3")
 
@@ -196,7 +196,7 @@ RETURN ONLY VALID JSON:
                         contents=prompt,
                         config={
                             "response_mime_type": "application/json",
-                            "temperature": 1.1
+                            "temperature": 1.0
                         }
                     )
 
@@ -213,35 +213,27 @@ RETURN ONLY VALID JSON:
                     if isinstance(result, dict):
                         result = [result]
 
-                    title = result[0].get("title", "")
+                    title         = result[0].get("title", "")
                     category_name = result[0].get("category", category)
 
                     self.save_history(title, category_name)
 
                     print(f"✅ SUCCESS with {model_name}")
-                    print(f"📌 Category: {category_name}")
-                    print(f"🎬 Title: {title}")
-                    print(f"📽️ visual_1: {result[0].get('visual_1')}")
-                    print(f"📽️ visual_2: {result[0].get('visual_2')}")
+                    print(f"📌 Category : {category_name}")
+                    print(f"🎬 Title    : {title}")
+                    print(f"📽️ visual_1 : {result[0].get('visual_1')}")
+                    print(f"📽️ visual_2 : {result[0].get('visual_2')}")
 
                     return result
 
                 except Exception as e:
-
                     err = str(e)
-
                     print(f"❌ Failed {model_name}: {err[:200]}")
 
-                    if (
-                        "503" in err
-                        or "429" in err
-                        or "overloaded" in err
-                        or "high demand" in err
-                    ):
+                    if any(x in err for x in ["503", "429", "overloaded", "high demand"]):
                         print("⏳ Waiting before retry...")
                         time.sleep(12)
                         continue
-
                     break
 
         print("❌ All models failed.")
@@ -249,13 +241,10 @@ RETURN ONLY VALID JSON:
 
 
 if __name__ == "__main__":
-
-    brain = ContentBrain()
-
+    brain  = ContentBrain()
     output = brain.generate_script()
 
     if output:
         with open("latest_script.json", "w", encoding="utf-8") as f:
             json.dump(output, f, indent=4, ensure_ascii=False)
-
         print("✅ latest_script.json saved")
