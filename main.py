@@ -1,22 +1,21 @@
 import asyncio
 import time
-from modules.brain import ContentBrain
-from modules.asset_manager import AssetManager
-from modules.audio import AudioEngine
-from modules.composer import Composer
-from modules.thumbnail import ThumbnailGenerator
 import os
 import shutil
 
+from modules.brain    import ContentBrain
+from modules.audio    import AudioEngine
+from modules.composer import Composer
+from modules.thumbnail import ThumbnailGenerator
+
 
 def clean_cache():
-    """Safely deletes temporary files"""
     print("🧹 Cleaning up temporary files...")
 
     folders_to_clean = [
         os.path.join(os.getcwd(), "assets", "audio_clips"),
         os.path.join(os.getcwd(), "assets", "video_clips"),
-        os.path.join(os.getcwd(), "assets", "temp")
+        os.path.join(os.getcwd(), "assets", "temp"),
     ]
 
     for folder in folders_to_clean:
@@ -29,7 +28,6 @@ def clean_cache():
             try:
                 if os.path.isfile(file_path) or os.path.islink(file_path):
                     os.unlink(file_path)
-                    print(f"   Deleted: {filename}")
                 elif os.path.isdir(file_path):
                     shutil.rmtree(file_path)
             except Exception as e:
@@ -41,9 +39,9 @@ def clean_cache():
 async def create_one_short(short_number):
     print(f"🚀 Starting New Short Generation #{short_number}...")
 
-    # ==========================================
-    # BRAIN
-    # ==========================================
+    # ══════════════════════════════════════════
+    # STEP 1 — BRAIN: Script generate karo
+    # ══════════════════════════════════════════
     brain = ContentBrain()
 
     try:
@@ -55,9 +53,9 @@ async def create_one_short(short_number):
         print(f"❌ Brain Error: {e}")
         return False
 
-    # ==========================================
-    # AUDIO
-    # ==========================================
+    # ══════════════════════════════════════════
+    # STEP 2 — AUDIO: TTS generate karo
+    # ══════════════════════════════════════════
     audio_engine = AudioEngine()
 
     try:
@@ -66,63 +64,60 @@ async def create_one_short(short_number):
         print(f"❌ Audio Error: {e}")
         return False
 
-    # ==========================================
-    # ASSETS
-    # ==========================================
-    asset_manager = AssetManager()
-    assets_map = asset_manager.get_videos(script_data)
-
-    # ==========================================
-    # COMPOSER
-    # ==========================================
+    # ══════════════════════════════════════════
+    # STEP 3 — COMPOSER: Visuals + Video banao
+    # (AssetManager ki zaroorat nahi —
+    #  Composer khud Pollinations + Pexels handle karta hai)
+    # ══════════════════════════════════════════
     composer = Composer()
 
-    # ✅ FIX: Sirf 2 arguments — [] wala third arg hata diya
-    final_scene_paths = composer.render_all_scenes(
-        script_data,
-        assets_map
-    )
+    final_scene_paths = composer.render_all_scenes(script_data)
 
     if not final_scene_paths:
         print("❌ Failed to generate scenes")
         return False
 
-    # ==========================================
-    # FINAL VIDEO
-    # ==========================================
-    composer.concatenate_with_transitions(final_scene_paths)
+    # ══════════════════════════════════════════
+    # STEP 4 — FINAL VIDEO: Scenes stitch karo
+    # ══════════════════════════════════════════
+    final_video = composer.concatenate_with_transitions(final_scene_paths)
+
+    if not final_video:
+        print("❌ Final video stitching failed")
+        return False
 
     clean_cache()
-
     print("✅ Short successfully created!")
 
-    # ==========================================
-    # THUMBNAIL
-    # ==========================================
+    # ══════════════════════════════════════════
+    # STEP 5 — THUMBNAIL
+    # ══════════════════════════════════════════
     print("🖼️ Generating Thumbnail...")
 
-    thumbnail_gen = ThumbnailGenerator()
-    thumbnail_path = thumbnail_gen.generate_thumbnail(
-        title=script_data[0].get('title', 'Tech Secrets'),
-        script_text=script_data[0].get('text', ''),
-        short_number=short_number
-    )
+    try:
+        thumbnail_gen  = ThumbnailGenerator()
+        thumbnail_path = thumbnail_gen.generate_thumbnail(
+            title=script_data[0].get("title", "Tech Secrets"),
+            script_text=script_data[0].get("text", ""),
+            short_number=short_number,
+        )
+    except Exception as e:
+        print(f"⚠️ Thumbnail Error: {e}")
+        thumbnail_path = None
 
-    # ==========================================
-    # YOUTUBE UPLOAD
-    # ==========================================
+    # ══════════════════════════════════════════
+    # STEP 6 — YOUTUBE UPLOAD
+    # ══════════════════════════════════════════
     print("📤 Uploading to YouTube...")
 
     try:
         from modules.uploader import YouTubeUploader
 
-        uploader = YouTubeUploader()
-
-        scene = script_data[0] if isinstance(script_data, list) else script_data
-
-        script_text = scene.get('text', 'Tech Secrets')
-        category    = scene.get('category', 'Tech')
-        title       = f"🔥 Viral Tech Trick {script_text[:35]}..."
+        uploader    = YouTubeUploader()
+        scene       = script_data[0] if isinstance(script_data, list) else script_data
+        script_text = scene.get("text", "Tech Secrets")
+        category    = scene.get("category", "Tech")
+        title       = f"🔥 {scene.get('title', 'Viral Tech Trick')}"
 
         description = f"""
 🔥 Yeh Tech Hack Aaj Hi Try Karo!
@@ -130,71 +125,38 @@ async def create_one_short(short_number):
 {script_text[:500]}...
 
 ⚡ Topics Covered:
-Android Tricks
-AI Tools
-ChatGPT Hacks
-Instagram Tricks
-WhatsApp Tips
-Cybersecurity
-Laptop Tips
-Gaming Tricks
-Future Technology
+Android Tricks | AI Tools | ChatGPT Hacks
+Instagram Tricks | WhatsApp Tips | Cybersecurity
+Laptop Tips | Gaming Tricks | Future Technology
 
-📌 Category:
-{category}
+📌 Category: {category}
 
 👍 Like karo agar useful laga
 🔔 Subscribe karo daily tech secrets ke liye
 
-DISCLAIMER:
-This video is made for educational and informational purposes only.
+DISCLAIMER: This video is for educational purposes only.
 
-#TechHacks
-#AndroidTips
-#AITools
-#ChatGPT
-#TechShorts
-#HiddenFeatures
-#MobileTricks
-#CyberSecurity
-#TechHindi
-#AI
-#TechNews
-#InstagramTips
-#WhatsAppTricks
-#LaptopTips
-#Smartphone
-
-Copyright Disclaimer Under Section 107 of the Copyright Act 1976.
+#TechHacks #AndroidTips #AITools #ChatGPT #TechShorts
+#HiddenFeatures #MobileTricks #CyberSecurity #TechHindi
+#AI #TechNews #InstagramTips #WhatsAppTricks #LaptopTips
+#Smartphone #YouTubeShorts #ViralTech #TechTips
 """
 
         tags = [
-            "tech hacks",
-            "android tricks",
-            "chatgpt tricks",
-            "ai tools",
-            "mobile tips",
-            "cybersecurity",
-            "tech shorts",
-            "viral tech",
-            "instagram tricks",
-            "gaming setup",
-            "laptop tips",
-            "hidden features",
-            "future technology",
-            "whatsapp tricks",
-            "youtube shorts"
+            "tech hacks", "android tricks", "chatgpt tricks",
+            "ai tools", "mobile tips", "cybersecurity",
+            "tech shorts", "viral tech", "instagram tricks",
+            "gaming setup", "laptop tips", "hidden features",
+            "future technology", "whatsapp tricks", "youtube shorts",
         ]
 
-        video_path = "assets/final/final_short.mp4"
-
         video_id = uploader.upload(
-            video_path=video_path,
+            video_path=final_video,
             title=title[:100],
             description=description,
             thumbnail_path=thumbnail_path,
             tags=tags,
-            privacy="public"
+            privacy="public",
         )
 
         if video_id:
