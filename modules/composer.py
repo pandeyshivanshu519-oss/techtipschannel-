@@ -17,19 +17,17 @@ class Composer:
 
         self.transitions = ['fade', 'wipeleft', 'wiperight', 'slideleft', 'slideright']
 
-        # ── Subtitle style ──────────────────────────────────────────────
-        # Bold white text, black outline, yellow highlight for keywords
         self.subtitle_style = (
             "FontName=Noto Sans,"
             "FontSize=18,"
-            "PrimaryColour=&H00FFFFFF,"   # white text
-            "OutlineColour=&H00000000,"   # black outline
-            "BackColour=&H80000000,"      # semi-transparent bg bar
+            "PrimaryColour=&H00FFFFFF,"
+            "OutlineColour=&H00000000,"
+            "BackColour=&H80000000,"
             "Bold=1,"
             "Outline=2,"
             "Shadow=1,"
-            "Alignment=2,"               # centre-bottom
-            "MarginV=60"                 # above bottom edge
+            "Alignment=2,"
+            "MarginV=60"
         )
 
     # ────────────────────────────────────────────────────────────────────
@@ -44,16 +42,11 @@ class Composer:
             return 0.0
 
     def _font_arg(self):
-        """Return fontfile= arg only when the custom font exists."""
         if os.path.exists(self.font_path):
             return f"fontfile={self.font_path}:"
         return ""
 
     def _chunk_text(self, text, max_chars=40):
-        """
-        Split a long script into short subtitle lines (≤max_chars each).
-        Breaks on word boundaries so no word is cut in half.
-        """
         words = text.split()
         lines, current = [], []
         for word in words:
@@ -68,10 +61,6 @@ class Composer:
         return lines
 
     def _make_subtitle_file(self, text, duration, scene_id):
-        """
-        Build a .srt subtitle file timed to fill the whole scene duration.
-        Returns path to the .srt file.
-        """
         lines = self._chunk_text(text, max_chars=38)
         if not lines:
             return None
@@ -95,10 +84,6 @@ class Composer:
         return srt_path
 
     def _burn_subtitles(self, input_video, srt_path, output_path):
-        """
-        Burn .srt subtitles into video using FFmpeg subtitles filter.
-        Falls back gracefully if font is missing.
-        """
         font_arg = self._font_arg()
         style = (
             f"{font_arg}"
@@ -112,7 +97,6 @@ class Composer:
             "Alignment=2,"
             "MarginV=60"
         )
-        # Escape Windows-style path backslashes for FFmpeg filter
         safe_srt = srt_path.replace("\\", "/").replace(":", "\\:")
         vf = f"subtitles='{safe_srt}':force_style='{style}'"
 
@@ -133,12 +117,7 @@ class Composer:
             shutil.copy2(input_video, output_path)
 
     def _add_hook_text(self, input_video, hook_line, output_path):
-        """
-        Burn a bold HOOK text in the top-centre for the first 3 seconds.
-        Example: 'क्या आप जानते हैं? 😱'
-        """
         font_arg = self._font_arg()
-        # Escape special chars for drawtext
         safe_text = hook_line.replace("'", "\\'").replace(":", "\\:")
 
         vf = (
@@ -171,10 +150,6 @@ class Composer:
             shutil.copy2(input_video, output_path)
 
     def _add_channel_watermark(self, input_video, channel_name, output_path):
-        """
-        Add a small semi-transparent channel name watermark at top-right.
-        Visible for the entire video.
-        """
         font_arg = self._font_arg()
         safe_name = channel_name.replace("'", "\\'").replace(":", "\\:")
 
@@ -221,12 +196,12 @@ class Composer:
             print(f"   ⚠️ Audio missing for Scene {scene_id}")
             return None
 
-        raw_path      = os.path.join(self.temp_dir, f"scene_{scene_id}_raw.mp4")
-        subbed_path   = os.path.join(self.temp_dir, f"scene_{scene_id}_sub.mp4")
-        hooked_path   = os.path.join(self.temp_dir, f"scene_{scene_id}_hook.mp4")
-        output_path   = os.path.join(self.temp_dir, f"scene_{scene_id}.mp4")
+        raw_path    = os.path.join(self.temp_dir, f"scene_{scene_id}_raw.mp4")
+        subbed_path = os.path.join(self.temp_dir, f"scene_{scene_id}_sub.mp4")
+        hooked_path = os.path.join(self.temp_dir, f"scene_{scene_id}_hook.mp4")
+        output_path = os.path.join(self.temp_dir, f"scene_{scene_id}.mp4")
 
-        # ── 1. Build raw scene (video + audio mix) ──────────────────────
+        # ── 1. Build raw scene ──────────────────────────────────────────
         try:
             voice_audio = ffmpeg.input(audio_path)
 
@@ -254,7 +229,23 @@ class Composer:
                 )
             else:
                 print(f"   ⚙️ Scene {scene_id}: 🎞️ A/B Split Mode")
+
+                # ✅ FIX: video_pair None check
+                if not video_pair:
+                    print(f"   ❌ Scene {scene_id}: video_pair is None, skipping scene")
+                    return None
+
                 path_a, path_b = video_pair
+
+                # ✅ FIX: individual path checks
+                if not path_a or not os.path.exists(path_a):
+                    print(f"   ❌ Scene {scene_id}: path_a missing or not found")
+                    return None
+
+                if not path_b or not os.path.exists(path_b):
+                    print(f"   ⚠️ Scene {scene_id}: path_b missing, using path_a for both")
+                    path_b = path_a
+
                 dur_a = total_dur / 2
                 dur_b = total_dur / 2 + 0.3
 
@@ -321,12 +312,23 @@ class Composer:
             print(f"🎲 Avatar injected in scenes: {[i+1 for i in avatar_indices]}")
 
         for i, scene in enumerate(script_data):
-            scene['is_first'] = (i == 0)          # mark first scene for hook
-            current_pair = video_pairs[i]
+            scene['is_first'] = (i == 0)
             is_avatar = i in avatar_indices
+
+            # ✅ FIX: Safe index access + None check
+            current_pair = video_pairs[i] if i < len(video_pairs) else None
 
             if is_avatar:
                 current_pair = (self.avatar_path, None)
+            elif current_pair is None:
+                # Fallback: agar video pair nahi mila toh avatar try karo
+                if os.path.exists(self.avatar_path):
+                    print(f"   ⚠️ Scene {i+1}: No video pair, falling back to avatar")
+                    is_avatar = True
+                    current_pair = (self.avatar_path, None)
+                else:
+                    print(f"   ❌ Scene {i+1}: No video pair and no avatar. Skipping.")
+                    continue
 
             output_path = self.process_scene(scene, current_pair, is_avatar)
             if output_path:
@@ -349,7 +351,6 @@ class Composer:
         output_path = os.path.join(self.final_dir, output_filename)
         no_wm_path  = os.path.join(self.final_dir, "final_nowm.mp4")
 
-        # Remove stale files
         for p in (output_path, no_wm_path):
             if os.path.exists(p):
                 try:
@@ -360,10 +361,9 @@ class Composer:
         if not video_paths:
             return None
 
-        # ── xfade stitching ─────────────────────────────────────────────
-        input1   = ffmpeg.input(video_paths[0])
-        v_stream = input1.video
-        a_stream = input1.audio
+        input1      = ffmpeg.input(video_paths[0])
+        v_stream    = input1.video
+        a_stream    = input1.audio
         current_dur = self.get_duration(video_paths[0])
 
         for i in range(1, len(video_paths)):
@@ -394,11 +394,9 @@ class Composer:
             print(f"❌ Stitching Error: {e}")
             return None
 
-        # ── Add channel watermark ────────────────────────────────────────
         print("🏷️ Adding channel watermark...")
         self._add_channel_watermark(no_wm_path, channel_name, output_path)
 
-        # Clean temp no-watermark file
         try:
             os.remove(no_wm_path)
         except Exception:
@@ -406,4 +404,3 @@ class Composer:
 
         print(f"✅ FINAL VIDEO SAVED: {output_path}")
         return output_path
-        
